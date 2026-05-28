@@ -156,7 +156,7 @@ function priceLine(stock: Stock): string {
 }
 
 function technicalLines(
-  stock: Stock,
+  _stock: Stock,
   tech: ReturnType<typeof computeTechnicals>,
 ): string[] {
   const out: string[] = ['**技術展望**'];
