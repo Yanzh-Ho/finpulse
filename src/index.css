@@ -1,0 +1,99 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: #070b14;
+  color: #ccd8f5;
+  font-family: 'Space Grotesk', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(79, 142, 247, 0.25);
+  border-radius: 2px;
+}
+
+@keyframes bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+input[type="range"] {
+  accent-color: #4f8ef7;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* Portfolio layout */
+.port-desktop { display: block; }
+.port-mobile  { display: none; }
+.port-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .sidebar {
+    display: none !important;
+  }
+  .mob-nav {
+    display: flex !important;
+  }
+  .chat-split {
+    width: 100% !important;
+  }
+  .analysis-split {
+    display: none !important;
+  }
+  /* Fix: body padding doesn't work when root has height:100dvh inline style.
+     Instead, shrink the app root to leave space for the fixed nav bar. */
+  body {
+    padding-bottom: 0;
+  }
+  .app-root {
+    height: calc(100dvh - 60px) !important;
+    max-height: calc(100dvh - 60px);
+  }
+  .port-desktop { display: none; }
+  .port-mobile  { display: block; }
+  .port-summary-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .hdr-search {
+    display: none !important;
+  }
+  .hdr-mkts {
+    display: none !important;
+  }
+}
