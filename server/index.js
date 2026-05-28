@@ -10,6 +10,9 @@ const PORT = 3001;
 
 const yf = new YahooFinanceModule({ suppressNotices: ['yahooSurvey'] });
 
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const YF_FETCH_OPTS = { headers: { 'User-Agent': BROWSER_UA } };
+
 // Groq cloud LLM config
 import Groq from 'groq-sdk';
 
@@ -17,35 +20,43 @@ const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY ?? '' });
 
 async function getStockPrice(symbol) {
-  const info = resolveInfo(symbol.trim());
-  const yahooSym = info.yahoo ?? symbol.trim();
+  const raw = symbol.trim();
+  const info = resolveInfo(raw);
   const isTW = info.market === 'TWSE' || info.market === 'TPEx';
+  // Unknown TW codes not in UNIVERSE — need .TW/.TWO probe
+  const isUnknownTW = /^\d{4,6}$/.test(raw) && !UNIVERSE[raw.toUpperCase()];
 
   try {
-    const [priceSettled, targetSettled] = await Promise.allSettled([
-      fetchOneWithRetry(yahooSym),
-      yf.quoteSummary(yahooSym, { modules: ['financialData'] }, { validateResult: false })
-        .then(qs => qs.financialData?.targetMeanPrice ?? null),
-    ]);
+    let yahooSym = info.yahoo ?? raw;
+    let priceData;
 
-    if (priceSettled.status === 'rejected') throw priceSettled.reason;
-    const data = priceSettled.value;
-    const targetPrice = targetSettled.status === 'fulfilled' ? (targetSettled.value ?? null) : null;
+    if (isUnknownTW) {
+      const { data, yahoo: foundYahoo } = await fetchTWWithFallback(raw);
+      priceData = data;
+      yahooSym  = foundYahoo;
+    } else {
+      priceData = await fetchOneWithRetry(yahooSym);
+    }
+
+    const targetPrice = await yf
+      .quoteSummary(yahooSym, { modules: ['financialData'] }, { validateResult: false, fetchOptions: YF_FETCH_OPTS })
+      .then(qs => qs.financialData?.targetMeanPrice ?? null)
+      .catch(() => null);
 
     return {
       ok: true,
-      ticker: symbol.trim(),
-      name: info.name ?? symbol,
+      ticker: raw,
+      name: info.name ?? raw,
       sym: isTW ? 'NT$' : '$',
-      price: data.price,
-      change: data.change,
-      pct: data.pct,
-      hi52: data.hi52,
-      lo52: data.lo52,
+      price: priceData.price,
+      change: priceData.change,
+      pct: priceData.pct,
+      hi52: priceData.hi52,
+      lo52: priceData.lo52,
       targetPrice,
     };
   } catch (err) {
-    return { ok: false, ticker: symbol, error: err.message };
+    return { ok: false, ticker: raw, error: err.message };
   }
 }
 
@@ -161,7 +172,7 @@ async function fetchOne(yahooSymbol) {
   const chartData = await yf.chart(
     yahooSymbol,
     { interval: '1d', period1: oneYearAgo },
-    { validateResult: false },
+    { validateResult: false, fetchOptions: YF_FETCH_OPTS },
   );
   const meta   = chartData.meta;
   const quotes = (chartData.quotes ?? []).filter(
@@ -195,6 +206,16 @@ async function fetchOneWithRetry(yahooSymbol) {
     }
     throw err;
   }
+}
+
+// For unknown 4-digit TW codes: try .TW (TWSE) first, fall back to .TWO (TPEx)
+async function fetchTWWithFallback(code) {
+  try {
+    const data = await fetchOneWithRetry(`${code}.TW`);
+    if (data.price > 0) return { data, yahoo: `${code}.TW`, market: 'TWSE' };
+  } catch { /* fall through to TPEx */ }
+  const data = await fetchOneWithRetry(`${code}.TWO`);
+  return { data, yahoo: `${code}.TWO`, market: 'TPEx' };
 }
 
 // TWSE MIS real-time quote — returns minimal price data (no history)
@@ -367,8 +388,9 @@ app.get('/api/quote/:ticker', async (req, res) => {
     }
   }
 
-  // 3. If 4-digit code and .TW failed, try .TWO
-  if (!priceData && /^\d{4}$/.test(ticker) && market === 'TWSE') {
+  // 3. If 4-digit code and .TW failed OR returned price=0 (blocked), try .TWO (TPEx)
+  const twFailed = !priceData || priceData.price === 0;
+  if (twFailed && /^\d{4}$/.test(ticker) && (market === 'TWSE' || market === 'TPEx')) {
     try {
       priceData  = await fetchOneWithRetry(`${ticker}.TWO`);
       dataSource = 'yahoo-tpex-fallback';
@@ -416,7 +438,7 @@ app.get('/api/fundamentals/:ticker', async (req, res) => {
     const qs = await yf.quoteSummary(
       yahoo,
       { modules: ['summaryDetail', 'defaultKeyStatistics', 'financialData', 'price', 'recommendationTrend', 'assetProfile'] },
-      { validateResult: false },
+      { validateResult: false, fetchOptions: YF_FETCH_OPTS },
     );
     const sd = qs.summaryDetail        ?? {};
     const ks = qs.defaultKeyStatistics ?? {};
@@ -538,7 +560,7 @@ app.get('/api/news/:ticker', async (req, res) => {
   };
 
   try {
-    const result = await yf.search(yahoo, { newsCount: 8 }, { validateResult: false });
+    const result = await yf.search(yahoo, { newsCount: 8 }, { validateResult: false, fetchOptions: YF_FETCH_OPTS });
     const news = (result.news ?? []).map(n => ({
       title: n.title,
       src: TW_PUBLISHER_MAP[n.publisher] ?? n.publisher,
