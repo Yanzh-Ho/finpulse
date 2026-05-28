@@ -65,7 +65,12 @@
       "Bash(lsof -ti:3001 -ti:5174)",
       "Bash(pkill -f \"vite\\\\|node.*server/index\")",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(grep \"\\\\.env$\")",
+      "Bash(git commit *)",
+      "Bash(git branch *)",
+      "Bash(git remote *)",
+      "Bash(git push *)"
     ]
   }
 }

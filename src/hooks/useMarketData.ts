@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { API_BASE } from '../utils/api';
 import type { Candle } from '../types';
 
 export interface MarketQuote {
@@ -26,7 +27,7 @@ export function useMarketData() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res  = await fetch('/api/market');
+      const res  = await fetch(`${API_BASE}/api/market`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: MarketResponse = await res.json();
       if (Object.keys(json.results).length > 0) {

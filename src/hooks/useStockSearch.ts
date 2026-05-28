@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_BASE } from '../utils/api';
 import type { Market } from '../utils/market';
 
 export interface SearchResult {
@@ -24,7 +25,7 @@ export function useStockSearch(query: string) {
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}`);
         if (res.ok) {
           const json: { results: SearchResult[] } = await res.json();
           setServerResults(json.results ?? []);

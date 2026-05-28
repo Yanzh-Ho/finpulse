@@ -3,6 +3,7 @@ import type { ViewId, Stock } from './types';
 import type { Market } from './utils/market';
 import { priceColor, marketLabel, marketBadgeStyle, isTWMarket } from './utils/market';
 import { STOCKS as MOCK_STOCKS } from './data/stocks';
+import { API_BASE } from './utils/api';
 import { useWatchlist } from './hooks/useWatchlist';
 import { useAuth } from './hooks/useAuth';
 import { findInUniverse, searchUniverse } from './data/stockUniverse';
@@ -156,7 +157,7 @@ export default function App() {
 
     // Fetch real data in background
     try {
-      const res = await fetch(`/api/quote/${encodeURIComponent(upper)}`);
+      const res = await fetch(`${API_BASE}/api/quote/${encodeURIComponent(upper)}`);
       const data = await res.json();
       setDynamicStocks(prev => ({ ...prev, [upper]: buildDynamicStock(data) }));
     } catch {
@@ -216,7 +217,7 @@ export default function App() {
     else if (/^\d{4,6}$/.test(upper)) phMarket = 'TWSE';
     setDynamicStocks(prev => ({ ...prev, [upper]: buildPlaceholder(upper, phName, phFull, phMarket) }));
     try {
-      const res = await fetch(`/api/quote/${encodeURIComponent(upper)}`);
+      const res = await fetch(`${API_BASE}/api/quote/${encodeURIComponent(upper)}`);
       const data = await res.json();
       setDynamicStocks(prev => ({ ...prev, [upper]: buildDynamicStock(data) }));
     } catch {}
@@ -248,7 +249,7 @@ export default function App() {
     setLoadingTicker(upper);
 
     try {
-      const res = await fetch(`/api/quote/${encodeURIComponent(upper)}`);
+      const res = await fetch(`${API_BASE}/api/quote/${encodeURIComponent(upper)}`);
       const data = await res.json();
       const built = buildDynamicStock(data);
       setDynamicStocks(prev => ({ ...prev, [upper]: built }));

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { API_BASE } from '../utils/api';
 import type { Stock, NewsItem } from '../types';
 import type { Market } from '../utils/market';
 import { priceColor, isTWMarket } from '../utils/market';
@@ -331,7 +332,7 @@ export function ChatPanel({ stocks, onStockSelect, onStockLoad, selectedTicker }
       : null;
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: msgs, stockContext }),

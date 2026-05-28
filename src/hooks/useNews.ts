@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_BASE } from '../utils/api';
 import type { NewsItem } from '../types';
 
 export function useNews(ticker: string | null) {
@@ -10,7 +11,7 @@ export function useNews(ticker: string | null) {
     if (!ticker) { setNews([]); setIsDemo(true); return; }
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/news/${encodeURIComponent(ticker)}`)
+    fetch(`${API_BASE}/api/news/${encodeURIComponent(ticker)}`)
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then((json: { news: NewsItem[]; isDemo?: boolean }) => {
         if (!cancelled) {

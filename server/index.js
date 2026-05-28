@@ -1,10 +1,23 @@
 import express from 'express';
+import cors from 'cors';
 import YahooFinanceModule from 'yahoo-finance2';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+
+app.use(cors({
+  origin: [
+    'https://yanzh-ho.github.io',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'http://localhost:5176',
+  ],
+  credentials: true,
+}));
+
 app.use(express.json());
 const PORT = 3001;
 
