@@ -739,10 +739,16 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, cacheAgeMs: marketCache ? Date.now() - marketCacheTs : null });
 });
 
-if (process.env.NODE_ENV === 'production') {
+// Serve built frontend in local production mode (not needed on Vercel — CDN handles it)
+if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
   const dist = path.join(__dirname, '../dist');
   app.use(express.static(dist));
   app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')));
 }
 
-app.listen(PORT, () => console.log(`[market] proxy on http://localhost:${PORT}`));
+// Start local server; on Vercel the function runtime imports `app` directly
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => console.log(`[market] proxy on http://localhost:${PORT}`));
+}
+
+export default app;
