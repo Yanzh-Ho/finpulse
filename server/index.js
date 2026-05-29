@@ -613,7 +613,102 @@ function relTime(sec) {
   return `${Math.floor(d / 7)} 週前`;
 }
 
-// News — market-aware search + Groq AI tag/sentiment classification, 15-min cache
+// Shared: fetch raw Yahoo news items with the given query and opts
+async function fetchYahooNews(query, count, opts) {
+  const r = await yf.search(query, { newsCount: count }, { validateResult: false, fetchOptions: opts });
+  return r.news ?? [];
+}
+
+// Shared: map raw Yahoo news items to our internal shape
+function mapRawNews(rawItems) {
+  return rawItems.map(n => ({
+    title: n.title,
+    src:   TW_PUBLISHER_MAP[n.publisher] ?? n.publisher,
+    time:  relTime(n.providerPublishTime),
+    sent:  kwSentiment(n.title),
+    ...(n.link ? { url: n.link } : {}),
+  }));
+}
+
+// Shared: apply Groq classification; on failure fall back to keyword-derived labels
+async function enrichWithGroq(news) {
+  if (news.length === 0) return news;
+  try {
+    const classified = await classifyNewsWithGroq(news);
+    return classified;
+  } catch (e) {
+    console.error('[news] Groq classification skipped:', e.message);
+    return news.map(n => ({
+      ...n,
+      tag:       '市場動態',
+      sentiment: n.sent === 'bullish' ? '利多' : n.sent === 'bearish' ? '利空' : '中性',
+    }));
+  }
+}
+
+// Portfolio news — aggregates news from multiple tickers (max 8), deduplicates, Groq-classifies
+// MUST be defined before /api/news/:ticker so Express matches it first
+app.get('/api/news/portfolio', async (req, res) => {
+  const tickersParam = String(req.query.tickers || '').trim();
+  if (!tickersParam) return res.json({ news: [], isDemo: false });
+
+  const tickers = [...new Set(
+    tickersParam.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
+  )].slice(0, 8);
+
+  const cacheKey = '_pf_' + tickers.slice().sort().join(',');
+  const hit = newsCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < NEWS_TTL) return res.json({ ...hit.data, cached: true });
+
+  const allItems = [];
+  let hasTW = false;
+
+  await Promise.allSettled(tickers.map(async (ticker) => {
+    const info  = resolveInfo(ticker);
+    const isTW  = info.market === 'TWSE' || info.market === 'TPEx';
+    if (isTW) hasTW = true;
+
+    const primaryQuery = isTW ? (info.name || ticker) : (info.yahoo ?? ticker);
+    const fetchOpts    = isTW
+      ? { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.5' } }
+      : YF_FETCH_OPTS;
+
+    let raw = [];
+    try { raw = await fetchYahooNews(primaryQuery, 3, fetchOpts); } catch { /* skip */ }
+
+    // Fallback: bare numeric code (e.g. "2330" instead of "台積電")
+    if (isTW && raw.length === 0) {
+      try {
+        const bare = ticker.includes('.') ? ticker.split('.')[0] : ticker;
+        raw = await fetchYahooNews(bare, 3, fetchOpts);
+      } catch { /* skip */ }
+    }
+
+    allItems.push(...mapRawNews(raw));
+  }));
+
+  // Deduplicate by exact title
+  const seen = new Set();
+  let news = allItems.filter(n => { if (seen.has(n.title)) return false; seen.add(n.title); return true; }).slice(0, 12);
+
+  // If all tickers returned nothing and portfolio contains TW stocks → generic TW market headlines
+  if (news.length === 0 && hasTW) {
+    try {
+      const opts = { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.5' } };
+      const raw  = await fetchYahooNews('台股', 8, opts);
+      news = mapRawNews(raw);
+      console.log(`[news] portfolio fell back to 台股 market headlines`);
+    } catch { /* ignore */ }
+  }
+
+  news = await enrichWithGroq(news);
+
+  const data = { news, isDemo: false };
+  newsCache.set(cacheKey, { data, ts: Date.now() });
+  res.json(data);
+});
+
+// Individual stock news — market-aware search with TW three-level fallback, 15-min cache
 app.get('/api/news/:ticker', async (req, res) => {
   const ticker = req.params.ticker.toUpperCase();
   const hit = newsCache.get(ticker);
@@ -623,45 +718,40 @@ app.get('/api/news/:ticker', async (req, res) => {
   const isTW  = info.market === 'TWSE' || info.market === 'TPEx';
   const yahoo = info.yahoo ?? ticker;
 
-  // TW stocks: search by Chinese name + TW Accept-Language to surface local Chinese news
-  // US stocks: search by Yahoo symbol for global English financial news
-  const searchQuery   = isTW ? (info.name || ticker) : yahoo;
+  const primaryQuery  = isTW ? (info.name || ticker) : yahoo;
   const localFetchOpts = isTW
     ? { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.5' } }
     : YF_FETCH_OPTS;
 
+  let rawItems = [];
   try {
-    const result = await yf.search(searchQuery, { newsCount: 8 }, { validateResult: false, fetchOptions: localFetchOpts });
-    let news = (result.news ?? []).map(n => ({
-      title: n.title,
-      src:   TW_PUBLISHER_MAP[n.publisher] ?? n.publisher,
-      time:  relTime(n.providerPublishTime),
-      sent:  kwSentiment(n.title),
-      ...(n.link ? { url: n.link } : {}),
-    }));
+    // Attempt 1: Chinese name (TW) or Yahoo symbol (US)
+    rawItems = await fetchYahooNews(primaryQuery, 8, localFetchOpts);
+  } catch { /* fall through */ }
 
-    // Groq AI: enrich each item with tag (category) + sentiment (Chinese); overrides keyword sent
-    if (news.length > 0) {
-      try {
-        news = await classifyNewsWithGroq(news);
-        console.log(`[news] Groq classified ${news.length} items for ${ticker}`);
-      } catch (e) {
-        console.error('[news] Groq classification skipped:', e.message);
-        // Fallback: derive Chinese sentiment from keyword-based sent
-        news = news.map(n => ({
-          ...n,
-          tag:       '市場動態',
-          sentiment: n.sent === 'bullish' ? '利多' : n.sent === 'bearish' ? '利空' : '中性',
-        }));
-      }
-    }
-
-    const data = { news, isDemo: false };
-    newsCache.set(ticker, { data, ts: Date.now() });
-    res.json(data);
-  } catch {
-    res.json({ news: [], isDemo: false });
+  // Attempt 2 (TW only): bare numeric code without .TW/.TWO suffix
+  if (isTW && rawItems.length === 0) {
+    try {
+      const bare = ticker.includes('.') ? ticker.split('.')[0] : ticker;
+      rawItems = await fetchYahooNews(bare, 8, localFetchOpts);
+      if (rawItems.length) console.log(`[news] fallback bare code "${bare}" for ${ticker}`);
+    } catch { /* fall through */ }
   }
+
+  // Attempt 3 (TW only): generic Taiwan market headlines so we never return empty
+  if (isTW && rawItems.length === 0) {
+    try {
+      rawItems = await fetchYahooNews('台股', 8, localFetchOpts);
+      if (rawItems.length) console.log(`[news] fallback "台股" headlines for ${ticker}`);
+    } catch { /* ignore */ }
+  }
+
+  let news = mapRawNews(rawItems);
+  news = await enrichWithGroq(news);
+
+  const data = { news, isDemo: false };
+  newsCache.set(ticker, { data, ts: Date.now() });
+  res.json(data);
 });
 
 // TWSE MIS proxy (called by client if needed)

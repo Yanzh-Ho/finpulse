@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { Stock, NewsItem } from '../types';
 import { STOCKS } from '../data/stocks';
 import { useNews } from '../hooks/useNews';
+import { usePortfolioNews } from '../hooks/usePortfolioNews';
+import { usePortfolio } from '../hooks/usePortfolio';
 
 interface Props {
   stock: Stock | null;
@@ -186,11 +188,28 @@ export function NewsView({ stock }: Props) {
   const [modal, setModal] = useState<NewsItem | null>(null);
   const { news: liveNews, isDemo } = useNews(stock?.ticker ?? null);
 
-  const mockItems = stock
-    ? stock.news
-    : Object.values(STOCKS).flatMap((s) => s.news.slice(0, 2));
+  // Portfolio-linked news — only active when no specific stock is selected
+  const { holdings } = usePortfolio();
+  const portfolioTickers = stock ? [] : holdings.map(h => h.ticker);
+  const { news: portfolioNews, loading: pfLoading } = usePortfolioNews(portfolioTickers);
 
-  const items = liveNews.length > 0 ? liveNews : mockItems;
+  // Priority: individual stock live news > portfolio news > mock/demo items
+  const isPortfolioMode = !stock;
+  const items = stock
+    ? (liveNews.length > 0 ? liveNews : stock.news)
+    : portfolioNews.length > 0
+      ? portfolioNews
+      : Object.values(STOCKS).flatMap((s) => s.news.slice(0, 2));
+
+  const showDemo = isPortfolioMode
+    ? (portfolioNews.length === 0 && !pfLoading && holdings.length === 0)
+    : (isDemo && liveNews.length === 0);
+
+  const headerSub = stock
+    ? `${stock.ticker} · ${stock.name} 相關新聞`
+    : holdings.length > 0
+      ? `投資組合 · ${holdings.slice(0, 5).map(h => h.ticker).join('、')}${holdings.length > 5 ? ' 等' : ''} 相關新聞`
+      : '市場精選新聞';
 
   return (
     <div
@@ -203,18 +222,29 @@ export function NewsView({ stock }: Props) {
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#ccd8f5' }}>新聞與情緒分析</div>
-          {isDemo && liveNews.length === 0 && (
-            <span style={{ fontSize: 10, color: '#2a4060', background: 'rgba(79,142,247,.07)', border: '1px solid rgba(79,142,247,.15)', padding: '3px 9px', borderRadius: 4 }}>
-              示範資料
-            </span>
-          )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {isPortfolioMode && holdings.length > 0 && (
+              <span style={{ fontSize: 10, color: '#4f8ef7', background: 'rgba(79,142,247,.1)', border: '1px solid rgba(79,142,247,.25)', padding: '3px 9px', borderRadius: 4 }}>
+                投資組合
+              </span>
+            )}
+            {showDemo && (
+              <span style={{ fontSize: 10, color: '#2a4060', background: 'rgba(79,142,247,.07)', border: '1px solid rgba(79,142,247,.15)', padding: '3px 9px', borderRadius: 4 }}>
+                示範資料
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ fontSize: 13, color: '#4a6890' }}>
-          {stock ? `${stock.ticker} · ${stock.name} 相關新聞` : '市場精選新聞'} · AI 情緒分析
+          {headerSub} · AI 情緒分析
         </div>
       </div>
 
-      {items.length === 0 ? (
+      {pfLoading && isPortfolioMode ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: '#4a6890', fontSize: 13 }}>
+          正在抓取投資組合新聞…
+        </div>
+      ) : items.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '48px 0', color: '#2a4060', fontSize: 13 }}>
           暫無相關新聞
         </div>
