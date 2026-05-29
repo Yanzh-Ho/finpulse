@@ -59,7 +59,7 @@ async function getStockPrice(symbol) {
     return {
       ok: true,
       ticker: raw,
-      name: info.name ?? raw,
+      name: priceData.stockName || info.name || raw,
       sym: isTW ? 'NT$' : '$',
       price: priceData.price,
       change: priceData.change,
@@ -193,9 +193,13 @@ async function fetchOne(yahooSymbol) {
   );
   const last  = quotes[quotes.length - 1];
   const prev  = quotes[quotes.length - 2];
-  const price  = meta.regularMarketPrice ?? last?.close ?? 0;
-  const change = prev ? +(price - prev.close).toFixed(2) : 0;
-  const pct    = prev ? +((change / prev.close) * 100).toFixed(2) : 0;
+  const price  = meta.regularMarketPrice ?? meta.currentPrice ?? meta.price ?? last?.close ?? 0;
+  const change = prev ? +(price - prev.close).toFixed(2) : (meta.regularMarketChange ?? 0);
+  // yahoo-finance2 returns regularMarketChangePercent as decimal (0.05 = 5%); multiply when used
+  const metaRawPct = meta.regularMarketChangePercent ?? meta.priceChangePercent;
+  const pct = prev
+    ? +((change / prev.close) * 100).toFixed(2)
+    : metaRawPct != null ? +(metaRawPct * 100).toFixed(2) : 0;
   const closes = quotes.map(q => q.close);
   const hi52 = meta.fiftyTwoWeekHigh ?? (closes.length ? Math.max(...closes) : 0);
   const lo52 = meta.fiftyTwoWeekLow  ?? (closes.length ? Math.min(...closes) : 0);
@@ -203,7 +207,8 @@ async function fetchOne(yahooSymbol) {
     o: +q.open.toFixed(2), h: +q.high.toFixed(2),
     l: +q.low.toFixed(2),  c: +q.close.toFixed(2), v: q.volume ?? 0,
   }));
-  return { price, change, pct, hi52, lo52, history };
+  const stockName = meta.longName || meta.shortName || meta.displayName || null;
+  return { price, change, pct, hi52, lo52, history, stockName };
 }
 
 // Yahoo Finance with 1 automatic retry on transient failure
@@ -416,10 +421,11 @@ app.get('/api/quote/:ticker', async (req, res) => {
     }
   }
 
+  const yahooName = priceData?.stockName || null;
   const result = {
     ticker,
-    name:        info.name     ?? ticker,
-    fullName:    info.fullName ?? ticker,
+    name:        yahooName || info.name     || ticker,
+    fullName:    yahooName || info.fullName || ticker,
     market,
     currency:    isTW ? 'TWD' : 'USD',
     sym:         isTW ? 'NT$' : '$',
