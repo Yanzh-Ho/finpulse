@@ -271,8 +271,9 @@ export function ChatPanel({ stocks, onStockSelect, onStockLoad, selectedTicker }
   ]);
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
+  const [awaitingTicker, setAwaitingTicker] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const showSuggestions = messages.length === 1;
+  const showSuggestions = messages.length === 1 && !awaitingTicker;
 
   // Fetch real fundamentals + news for the selected ticker so analysis text uses real data
   const { data: fundamentals } = useFundamentals(selectedTicker);
@@ -287,9 +288,8 @@ export function ChatPanel({ stocks, onStockSelect, onStockLoad, selectedTicker }
   const realNewsRef = useRef(realNews);
   useEffect(() => { realNewsRef.current = realNews; }, [realNews]);
 
-  // Track which ticker was already handled by send() to avoid duplicate auto-analysis
-  const lastSendTickerRef  = useRef<string | null>(null);
-  const autoAnalysisAbortRef = useRef<AbortController | null>(null);
+  // Track which ticker was already handled by send() so we skip the analysis button for it
+  const lastSendTickerRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (bottomRef.current) {
@@ -396,52 +396,49 @@ export function ChatPanel({ stocks, onStockSelect, onStockLoad, selectedTicker }
     }
   }
 
-  // Auto-analyse whenever the selected stock changes (e.g. clicking watchlist)
+  // When a watchlist stock is selected, show the manual analysis button instead of auto-firing
   useEffect(() => {
-    if (!selectedTicker) return;
-
-    // send() already generated analysis for this ticker — skip duplicate
+    if (!selectedTicker) { setAwaitingTicker(null); return; }
+    // send() already handled this ticker — don't show the button again
     if (selectedTicker === lastSendTickerRef.current) {
       lastSendTickerRef.current = null;
       return;
     }
+    setAwaitingTicker(selectedTicker);
+  }, [selectedTicker]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    if (autoAnalysisAbortRef.current) autoAnalysisAbortRef.current.abort();
-    const controller = new AbortController();
-    autoAnalysisAbortRef.current = controller;
+  async function triggerAnalysis() {
+    if (!awaitingTicker || thinking) return;
+    const ticker = awaitingTicker;
+    setAwaitingTicker(null);
 
-    const typingId = Date.now();
-    setMessages((prev) => [...prev, { id: typingId, role: 'ai', typing: true }]);
+    const stock = stocksRef.current[ticker];
+    if (!stock) return;
 
-    const timer = setTimeout(async () => {
-      if (controller.signal.aborted) return;
-      const stock = stocksRef.current[selectedTicker];
-      if (!stock) {
-        setMessages((prev) => prev.filter((m) => m.id !== typingId));
-        return;
-      }
+    const analysisText = `請分析 ${stock.name}（${ticker}）的投資價值，給出明確的買進/持有/賣出建議與理由。`;
+    const userMsgId = Date.now();
+    const typingId  = userMsgId + 1;
+    setMessages((prev) => [
+      ...prev,
+      { id: userMsgId, role: 'user', text: analysisText },
+      { id: typingId, role: 'ai', typing: true },
+    ]);
+    setThinking(true);
+    try {
       const msgs: Array<{ role: 'user' | 'assistant'; content: string }> = [
-        { role: 'user', content: `請分析 ${stock.name}（${selectedTicker}）的投資價值，給出明確的買進/持有/賣出建議與理由。` },
+        { role: 'user', content: analysisText },
       ];
       const stockCtx = { stock, fundamentals: fundamentalsRef.current, news: realNewsRef.current ?? [] };
-      await callChatAPI(typingId, msgs, stockCtx, controller.signal);
-    }, 900);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-      setMessages((prev) => prev.filter((m) => !m.typing));
-    };
-  }, [selectedTicker]); // eslint-disable-line react-hooks/exhaustive-deps
+      await callChatAPI(typingId, msgs, stockCtx);
+    } finally {
+      setThinking(false);
+    }
+  }
 
   async function send(text: string, ticker?: string) {
     if (!text.trim() || thinking) return;
 
-    // Cancel any pending auto-analysis — send() takes precedence
-    if (autoAnalysisAbortRef.current) {
-      autoAnalysisAbortRef.current.abort();
-      autoAnalysisAbortRef.current = null;
-    }
+    setAwaitingTicker(null);
     setMessages((prev) => prev.filter((m) => !m.typing));
 
     const userMsg: Message = { id: Date.now(), role: 'user', text: text.trim() };
@@ -616,8 +613,53 @@ export function ChatPanel({ stocks, onStockSelect, onStockLoad, selectedTicker }
         <div ref={bottomRef} />
       </div>
 
-      {/* Suggestions */}
-      {showSuggestions && (
+      {/* Analysis prompt button — shown when a watchlist stock was selected but not yet analysed */}
+      {awaitingTicker && stocks[awaitingTicker] ? (
+        <div style={{ padding: '0 14px 12px' }}>
+          <button
+            onClick={triggerAnalysis}
+            disabled={thinking}
+            style={{
+              width: '100%',
+              padding: '14px 18px',
+              border: '1px solid rgba(79,142,247,.45)',
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, rgba(79,142,247,.13) 0%, rgba(79,142,247,.05) 100%)',
+              color: '#ccd8f5',
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: thinking ? 'default' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              letterSpacing: '.02em',
+              transition: 'all .2s',
+              opacity: thinking ? 0.5 : 1,
+              boxShadow: 'inset 0 1px 0 rgba(79,142,247,.1)',
+            }}
+            onMouseEnter={(e) => {
+              if (thinking) return;
+              const el = e.currentTarget;
+              el.style.borderColor = 'rgba(79,142,247,.75)';
+              el.style.background = 'linear-gradient(135deg, rgba(79,142,247,.22) 0%, rgba(79,142,247,.1) 100%)';
+              el.style.boxShadow = '0 0 20px rgba(79,142,247,.22), inset 0 1px 0 rgba(79,142,247,.15)';
+            }}
+            onMouseLeave={(e) => {
+              const el = e.currentTarget;
+              el.style.borderColor = 'rgba(79,142,247,.45)';
+              el.style.background = 'linear-gradient(135deg, rgba(79,142,247,.13) 0%, rgba(79,142,247,.05) 100%)';
+              el.style.boxShadow = 'inset 0 1px 0 rgba(79,142,247,.1)';
+            }}
+          >
+            🤖 啟動 FinPulse AI 進行全面個股分析
+          </button>
+          <div style={{ textAlign: 'center', fontSize: 11, color: '#4a6890', marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+            {stocks[awaitingTicker].name} · {awaitingTicker}
+          </div>
+        </div>
+      ) : showSuggestions ? (
         <div style={{ padding: '0 14px 12px', display: 'flex', flexWrap: 'wrap', gap: 7 }}>
           {SUGGESTIONS.map((s) => (
             <button
@@ -651,7 +693,7 @@ export function ChatPanel({ stocks, onStockSelect, onStockLoad, selectedTicker }
             </button>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Input */}
       <div
