@@ -17,6 +17,21 @@ function sentLabel(s: string) {
   return s === 'bullish' ? '看多' : s === 'bearish' ? '看空' : '中性';
 }
 
+function TagBadge({ tag }: { tag: string }) {
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 600,
+      color: '#4f8ef7',
+      background: 'rgba(79,142,247,.1)',
+      border: '1px solid rgba(79,142,247,.25)',
+      padding: '2px 8px', borderRadius: 4,
+      letterSpacing: '.02em', flexShrink: 0,
+    }}>
+      {tag}
+    </span>
+  );
+}
+
 function NewsModal({ item, onClose }: { item: NewsItem; onClose: () => void }) {
   return (
     <div
@@ -51,15 +66,16 @@ function NewsModal({ item, onClose }: { item: NewsItem; onClose: () => void }) {
           ×
         </button>
 
-        {/* Sentiment badge */}
-        <div style={{ marginBottom: 14 }}>
+        {/* Badges row */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
           <span style={{
             fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 4,
             color: sentColor(item.sent), background: sentBg(item.sent),
             border: `1px solid ${sentColor(item.sent)}40`, letterSpacing: '.04em',
           }}>
-            {sentLabel(item.sent)}
+            {item.sentiment ?? sentLabel(item.sent)}
           </span>
+          {item.tag && <TagBadge tag={item.tag} />}
         </div>
 
         {/* Title */}
@@ -115,6 +131,7 @@ function NewsModal({ item, onClose }: { item: NewsItem; onClose: () => void }) {
 }
 
 function NewsCard({ item, onClick }: { item: NewsItem; onClick: () => void }) {
+  const displaySentiment = item.sentiment ?? sentLabel(item.sent);
   return (
     <div
       onClick={onClick}
@@ -146,10 +163,11 @@ function NewsCard({ item, onClick }: { item: NewsItem; onClick: () => void }) {
           background: sentBg(item.sent), border: `1px solid ${sentColor(item.sent)}40`,
           padding: '3px 9px', borderRadius: 4, flexShrink: 0, letterSpacing: '.03em',
         }}>
-          {sentLabel(item.sent)}
+          {displaySentiment}
         </span>
       </div>
-      <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#4a6890', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, fontSize: 11, color: '#4a6890', alignItems: 'center', flexWrap: 'wrap' }}>
+        {item.tag && <TagBadge tag={item.tag} />}
         <span style={{ color: '#4f8ef7', fontWeight: 500 }}>{item.src}</span>
         <span style={{ color: '#1e3050' }}>·</span>
         <span>{item.time}</span>

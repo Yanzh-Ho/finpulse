@@ -12,6 +12,8 @@ export interface NewsItem {
   time: string;
   sent: 'bullish' | 'bearish' | 'neutral';
   url?: string;
+  tag?: string;       // AI-classified category (e.g. 營收財報, 產業趨勢)
+  sentiment?: string; // AI sentiment in Chinese (利多, 中性, 利空)
 }
 
 export type Market = 'US' | 'TWSE' | 'TPEx' | 'Emerging' | 'InnovationBoard';

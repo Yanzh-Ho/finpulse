@@ -538,55 +538,124 @@ app.get('/api/fundamentals/:ticker', async (req, res) => {
   }
 });
 
-// News with keyword-based sentiment, 15-min cache
+// ── News helpers ─────────────────────────────────────────────────────────────
+
+const BULL_KW = ['buy','surge','beat','record','growth','strong','rise','gain','upgrade','outperform','買超','漲','超越','成長','創高','上調','買進'];
+const BEAR_KW = ['sell','drop','miss','decline','weak','fall','loss','downgrade','underperform','賣超','跌','下修','虧損','下調'];
+function kwSentiment(title) {
+  const l = title.toLowerCase();
+  const b = BULL_KW.filter(k => l.includes(k)).length;
+  const s = BEAR_KW.filter(k => l.includes(k)).length;
+  return b > s ? 'bullish' : s > b ? 'bearish' : 'neutral';
+}
+
+async function classifyNewsWithGroq(items) {
+  const SENT_MAP = { '利多': 'bullish', '利空': 'bearish', '中性': 'neutral' };
+  const numbered = items.map((n, i) => `${i + 1}. ${n.title}`).join('\n');
+  const prompt =
+`你是專業金融新聞分類器。針對以下每條新聞標題，分配 tag 與 sentiment。
+tag：從「營收財報、產業趨勢、主力動向、大盤宏觀、公司要聞、市場動態」選一個最適合的。
+sentiment：從「利多、中性、利空」選一個。
+
+只回傳 JSON 陣列（長度須等於標題條數），不得包含任何其他說明文字：
+[{"tag":"...","sentiment":"..."},...]
+
+新聞標題：
+${numbered}`;
+
+  const completion = await Promise.race([
+    groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      max_tokens: 512,
+      stream: false,
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Groq timeout')), 8000)),
+  ]);
+
+  const content = completion.choices[0]?.message?.content ?? '';
+  const match   = content.match(/\[[\s\S]*\]/);
+  if (!match) throw new Error('Groq returned no JSON array');
+  const labels  = JSON.parse(match[0]);
+
+  return items.map((n, i) => {
+    const lbl = labels[i] ?? {};
+    return {
+      ...n,
+      tag:       lbl.tag       ?? '市場動態',
+      sentiment: lbl.sentiment ?? '中性',
+      sent:      SENT_MAP[lbl.sentiment] ?? kwSentiment(n.title),
+    };
+  });
+}
+
+const TW_PUBLISHER_MAP = {
+  'Yahoo Finance': 'Yahoo 台灣財經',
+  'Reuters': '路透社',
+  'Bloomberg': '彭博社',
+  'CNBC': 'CNBC',
+  'MarketWatch': 'MarketWatch',
+  'Benzinga': 'Benzinga',
+  'Seeking Alpha': 'Seeking Alpha',
+  'The Motley Fool': 'The Motley Fool',
+  'Investopedia': 'Investopedia',
+  'Business Wire': 'Business Wire',
+  'PR Newswire': 'PR Newswire',
+};
+
+function relTime(sec) {
+  const h = Math.floor((Date.now() - sec * 1000) / 3.6e6);
+  const d = Math.floor(h / 24);
+  if (h < 1)  return '剛剛';
+  if (h < 24) return `${h} 小時前`;
+  if (d < 7)  return `${d} 天前`;
+  return `${Math.floor(d / 7)} 週前`;
+}
+
+// News — market-aware search + Groq AI tag/sentiment classification, 15-min cache
 app.get('/api/news/:ticker', async (req, res) => {
   const ticker = req.params.ticker.toUpperCase();
   const hit = newsCache.get(ticker);
   if (hit && Date.now() - hit.ts < NEWS_TTL) return res.json({ ...hit.data, cached: true });
 
   const info  = resolveInfo(ticker);
+  const isTW  = info.market === 'TWSE' || info.market === 'TPEx';
   const yahoo = info.yahoo ?? ticker;
 
-  const bullishKw = ['buy','surge','beat','record','growth','strong','rise','gain','upgrade','outperform','買超','漲','超越','成長','創高','上調','買進'];
-  const bearishKw = ['sell','drop','miss','decline','weak','fall','loss','downgrade','underperform','賣超','跌','下修','虧損','下調'];
-  const sentiment = t => {
-    const l = t.toLowerCase();
-    const b = bullishKw.filter(k => l.includes(k)).length;
-    const s = bearishKw.filter(k => l.includes(k)).length;
-    return b > s ? 'bullish' : s > b ? 'bearish' : 'neutral';
-  };
-  const relTime = sec => {
-    const h = Math.floor((Date.now() - sec * 1000) / 3.6e6);
-    const d = Math.floor(h / 24);
-    if (h < 1)  return '剛剛';
-    if (h < 24) return `${h} 小時前`;
-    if (d < 7)  return `${d} 天前`;
-    return `${Math.floor(d / 7)} 週前`;
-  };
-
-  const TW_PUBLISHER_MAP = {
-    'Yahoo Finance': 'Yahoo 台灣財經',
-    'Reuters': '路透社',
-    'Bloomberg': '彭博社',
-    'CNBC': 'CNBC',
-    'MarketWatch': 'MarketWatch',
-    'Benzinga': 'Benzinga',
-    'Seeking Alpha': 'Seeking Alpha',
-    'The Motley Fool': 'The Motley Fool',
-    'Investopedia': 'Investopedia',
-    'Business Wire': 'Business Wire',
-    'PR Newswire': 'PR Newswire',
-  };
+  // TW stocks: search by Chinese name + TW Accept-Language to surface local Chinese news
+  // US stocks: search by Yahoo symbol for global English financial news
+  const searchQuery   = isTW ? (info.name || ticker) : yahoo;
+  const localFetchOpts = isTW
+    ? { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.5' } }
+    : YF_FETCH_OPTS;
 
   try {
-    const result = await yf.search(yahoo, { newsCount: 8 }, { validateResult: false, fetchOptions: YF_FETCH_OPTS });
-    const news = (result.news ?? []).map(n => ({
+    const result = await yf.search(searchQuery, { newsCount: 8 }, { validateResult: false, fetchOptions: localFetchOpts });
+    let news = (result.news ?? []).map(n => ({
       title: n.title,
-      src: TW_PUBLISHER_MAP[n.publisher] ?? n.publisher,
-      time: relTime(n.providerPublishTime),
-      sent: sentiment(n.title),
+      src:   TW_PUBLISHER_MAP[n.publisher] ?? n.publisher,
+      time:  relTime(n.providerPublishTime),
+      sent:  kwSentiment(n.title),
       ...(n.link ? { url: n.link } : {}),
     }));
+
+    // Groq AI: enrich each item with tag (category) + sentiment (Chinese); overrides keyword sent
+    if (news.length > 0) {
+      try {
+        news = await classifyNewsWithGroq(news);
+        console.log(`[news] Groq classified ${news.length} items for ${ticker}`);
+      } catch (e) {
+        console.error('[news] Groq classification skipped:', e.message);
+        // Fallback: derive Chinese sentiment from keyword-based sent
+        news = news.map(n => ({
+          ...n,
+          tag:       '市場動態',
+          sentiment: n.sent === 'bullish' ? '利多' : n.sent === 'bearish' ? '利空' : '中性',
+        }));
+      }
+    }
+
     const data = { news, isDemo: false };
     newsCache.set(ticker, { data, ts: Date.now() });
     res.json(data);
