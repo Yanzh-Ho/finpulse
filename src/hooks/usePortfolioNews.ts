@@ -12,7 +12,7 @@ export function usePortfolioNews(tickers: string[]) {
     if (!key) { setNews([]); return; }
     let cancelled = false;
     setLoading(true);
-    fetch(`${API_BASE}/api/news/portfolio?tickers=${encodeURIComponent(key)}`)
+    fetch(`${API_BASE}/news/portfolio?tickers=${encodeURIComponent(key)}`)
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then((json: { news: NewsItem[] }) => {
         if (!cancelled) { setNews(json.news ?? []); setLoading(false); }

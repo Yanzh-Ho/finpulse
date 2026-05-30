@@ -25,7 +25,7 @@ export function useFundamentals(ticker: string | null) {
     if (!ticker) { setData(null); return; }
     let cancelled = false;
     setLoading(true);
-    fetch(`${API_BASE}/api/fundamentals/${encodeURIComponent(ticker)}`)
+    fetch(`${API_BASE}/fundamentals/${encodeURIComponent(ticker)}`)
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then((json: { data: Fundamentals | null }) => {
         if (!cancelled) { setData(json.data); setLoading(false); }

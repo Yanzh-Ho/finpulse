@@ -11,7 +11,7 @@ export function useNews(ticker: string | null) {
     if (!ticker) { setNews([]); setIsDemo(true); return; }
     let cancelled = false;
     setLoading(true);
-    fetch(`${API_BASE}/api/news/${encodeURIComponent(ticker)}`)
+    fetch(`${API_BASE}/news/${encodeURIComponent(ticker)}`)
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then((json: { news: NewsItem[]; isDemo?: boolean }) => {
         if (!cancelled) {

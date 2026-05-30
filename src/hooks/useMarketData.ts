@@ -27,7 +27,7 @@ export function useMarketData() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res  = await fetch(`${API_BASE}/api/market`);
+      const res  = await fetch(`${API_BASE}/market`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: MarketResponse = await res.json();
       if (Object.keys(json.results).length > 0) {

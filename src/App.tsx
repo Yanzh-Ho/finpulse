@@ -157,7 +157,7 @@ export default function App() {
 
     // Fetch real data in background
     try {
-      const res = await fetch(`${API_BASE}/api/quote/${encodeURIComponent(upper)}`);
+      const res = await fetch(`${API_BASE}/quote/${encodeURIComponent(upper)}`);
       const data = await res.json();
       setDynamicStocks(prev => ({ ...prev, [upper]: buildDynamicStock(data) }));
     } catch {
@@ -217,7 +217,7 @@ export default function App() {
     else if (/^\d{4,6}$/.test(upper)) phMarket = 'TWSE';
     setDynamicStocks(prev => ({ ...prev, [upper]: buildPlaceholder(upper, phName, phFull, phMarket) }));
     try {
-      const res = await fetch(`${API_BASE}/api/quote/${encodeURIComponent(upper)}`);
+      const res = await fetch(`${API_BASE}/quote/${encodeURIComponent(upper)}`);
       const data = await res.json();
       setDynamicStocks(prev => ({ ...prev, [upper]: buildDynamicStock(data) }));
     } catch {}
@@ -249,7 +249,7 @@ export default function App() {
     setLoadingTicker(upper);
 
     try {
-      const res = await fetch(`${API_BASE}/api/quote/${encodeURIComponent(upper)}`);
+      const res = await fetch(`${API_BASE}/quote/${encodeURIComponent(upper)}`);
       const data = await res.json();
       const built = buildDynamicStock(data);
       setDynamicStocks(prev => ({ ...prev, [upper]: built }));
