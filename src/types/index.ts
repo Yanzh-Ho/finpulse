@@ -1,4 +1,5 @@
 export interface Candle {
+  date?: string; // ISO date string YYYY-MM-DD
   o: number;
   h: number;
   l: number;

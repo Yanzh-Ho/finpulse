@@ -24,7 +24,15 @@ const PORT = 3001;
 const yf = new YahooFinanceModule({ suppressNotices: ['yahooSurvey'] });
 
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-const YF_FETCH_OPTS = { headers: { 'User-Agent': BROWSER_UA } };
+const YF_FETCH_OPTS = {
+  headers: {
+    'User-Agent':      BROWSER_UA,
+    'Accept':          'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer':         'https://finance.yahoo.com/',
+    'Origin':          'https://finance.yahoo.com',
+  },
+};
 
 // Groq cloud LLM config
 import Groq from 'groq-sdk';
@@ -180,11 +188,11 @@ const QUOTE_TTL         = 5 * 60 * 1000;
 
 // ── Core: fetch 1-year OHLCV from Yahoo Finance ──────────────────────────────
 async function fetchOne(yahooSymbol) {
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  // Use `range` (native API parameter) instead of period1/period2 Date objects —
+  // avoids timezone/serialization issues on cloud runners like Vercel.
   const chartData = await yf.chart(
     yahooSymbol,
-    { interval: '1d', period1: oneYearAgo },
+    { interval: '1d', range: '1y' },
     { validateResult: false, fetchOptions: YF_FETCH_OPTS },
   );
   const meta   = chartData.meta;
@@ -204,6 +212,7 @@ async function fetchOne(yahooSymbol) {
   const hi52 = meta.fiftyTwoWeekHigh ?? (closes.length ? Math.max(...closes) : 0);
   const lo52 = meta.fiftyTwoWeekLow  ?? (closes.length ? Math.min(...closes) : 0);
   const history = quotes.map(q => ({
+    date: q.date instanceof Date ? q.date.toISOString().slice(0, 10) : undefined,
     o: +q.open.toFixed(2), h: +q.high.toFixed(2),
     l: +q.low.toFixed(2),  c: +q.close.toFixed(2), v: q.volume ?? 0,
   }));
